@@ -385,8 +385,8 @@ window.addEventListener('beforeunload', function(e) {
 let records = [];
 let editId = null;
 let unsavedChanges = false;
-let sortKey1 = 'vendor', sortDir1 = 1;
-let sortKey2 = 'vendor', sortDir2 = 1;
+let sortKey1 = null, sortDir1 = 1;
+let sortKey2 = null, sortDir2 = 1;
 
 function resetView() {
   document.getElementById('filterVendor').value = '';
@@ -395,8 +395,8 @@ function resetView() {
   document.querySelectorAll('.checkbox-filter input[type="checkbox"]').forEach(cb => {
     cb.checked = (cb.value === '予定' || cb.value === '返却中');
   });
-  sortKey1 = 'vendor'; sortDir1 = 1;
-  sortKey2 = 'vendor'; sortDir2 = 1;
+  sortKey1 = null; sortDir1 = 1;
+  sortKey2 = null; sortDir2 = 1;
   renderAll();
   showToast('表示をリセットしました');
 }
@@ -464,16 +464,48 @@ function getCheckedCategories() {
     .map(cb => cb.value);
 }
 
+const CATEGORY_ORDER = { '返却中': 0, '予定': 1, '完了': 2, 'なし': 3, '渡し中': 4 };
+
 function sortRecords(arr, key, dir) {
   return [...arr].sort((a, b) => {
+    // カラムクリック時は指定キー優先、次に区分→業者→渡し日
     let av = a[key] || '', bv = b[key] || '';
     if (key === 'cost') { av = Number(av); bv = Number(bv); }
-    return av < bv ? -dir : av > bv ? dir : 0;
+    if (key === 'category') { av = CATEGORY_ORDER[a.category] ?? 9; bv = CATEGORY_ORDER[b.category] ?? 9; }
+    const primary = av < bv ? -dir : av > bv ? dir : 0;
+    if (primary !== 0) return primary;
+
+    // 2次ソート：業者名
+    if (key !== 'vendor') {
+      const va = a.vendor || '', vb = b.vendor || '';
+      if (va !== vb) return va < vb ? 1 : -1;
+    }
+    // 3次ソート：渡し日
+    if (key !== 'sentDate') {
+      const sa = a.sentDate || '', sb = b.sentDate || '';
+      if (sa !== sb) return sa < sb ? 1 : -1;
+    }
+    return 0;
+  });
+}
+
+function defaultSort(arr) {
+  return [...arr].sort((a, b) => {
+    // 1: 区分順
+    const ca = CATEGORY_ORDER[a.category] ?? 9;
+    const cb = CATEGORY_ORDER[b.category] ?? 9;
+    if (ca !== cb) return ca - cb;
+    // 2: 業者名
+    const va = a.vendor || '', vb = b.vendor || '';
+    if (va !== vb) return va < vb ? -1 : 1;
+    // 3: 渡し日
+    const sa = a.sentDate || '', sb = b.sentDate || '';
+    return sa < sb ? -1 : sa > sb ? 1 : 0;
   });
 }
 
 function renderTable(tbodyId, records, sortKey, sortDir, countId) {
-  const sorted = sortRecords(records, sortKey, sortDir);
+  const sorted = sortKey ? sortRecords(records, sortKey, sortDir) : defaultSort(records);
   document.getElementById(countId).textContent = sorted.length + '件';
 
   const tbody = document.getElementById(tbodyId);
