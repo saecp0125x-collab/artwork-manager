@@ -375,8 +375,16 @@
 <div class="toast" id="toast"></div>
 
 <script>
+window.addEventListener('beforeunload', function(e) {
+  if (unsavedChanges) {
+    e.preventDefault();
+    e.returnValue = 'データが保存されていません。ページを閉じますか？';
+  }
+});
+
 let records = [];
 let editId = null;
+let unsavedChanges = false;
 let sortKey1 = 'vendor', sortDir1 = 1;
 let sortKey2 = 'vendor', sortDir2 = 1;
 
@@ -585,6 +593,7 @@ function saveRecord() {
   if (editId) { const i = records.findIndex(r => r.id === editId); records[i] = rec; }
   else records.unshift(rec);
 
+  unsavedChanges = true;
   clearForm(); renderAll();
   showToast(editId ? '更新しました' : '登録しました');
 }
@@ -592,6 +601,7 @@ function saveRecord() {
 function deleteRecord(id) {
   if (!confirm('削除しますか？')) return;
   records = records.filter(r => r.id !== id);
+  unsavedChanges = true;
   renderAll(); showToast('削除しました');
 }
 
@@ -602,6 +612,7 @@ function saveFile() {
   a.href = URL.createObjectURL(blob);
   a.download = `artwork-data-${today()}.json`;
   a.click();
+  unsavedChanges = false;
   showToast('保存しました');
 }
 
