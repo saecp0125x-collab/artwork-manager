@@ -254,14 +254,14 @@
       <table>
         <thead>
           <tr>
+            <th>区分</th>
             <th onclick="sortTable(1,'vendor')">業者名 ↕</th>
-            <th onclick="sortTable(1,'artist')" class="hide-sp">作家名 ↕</th>
+            <th onclick="sortTable(1,'artist')">作家名 ↕</th>
             <th onclick="sortTable(1,'artwork')">作品名 ↕</th>
-            <th onclick="sortTable(1,'sentDate')">渡した日 ↕</th>
+            <th onclick="sortTable(1,'sentDate')" class="hide-sp">渡した日 ↕</th>
             <th onclick="sortTable(1,'returnDate')" class="hide-sp">返却予定日 ↕</th>
             <th onclick="sortTable(1,'cost')" class="hide-sp">費用 ↕</th>
-            <th class="hide-sp">備考</th>
-            <th>区分</th>
+            <th>備考</th>
             <th></th>
           </tr>
         </thead>
@@ -280,14 +280,14 @@
       <table>
         <thead>
           <tr>
+            <th>区分</th>
             <th onclick="sortTable(2,'vendor')">業者名 ↕</th>
-            <th onclick="sortTable(2,'artist')" class="hide-sp">作家名 ↕</th>
+            <th onclick="sortTable(2,'artist')">作家名 ↕</th>
             <th onclick="sortTable(2,'artwork')">作品名 ↕</th>
-            <th onclick="sortTable(2,'sentDate')">渡した日 ↕</th>
+            <th onclick="sortTable(2,'sentDate')" class="hide-sp">渡した日 ↕</th>
             <th onclick="sortTable(2,'returnDate')" class="hide-sp">返却予定日 ↕</th>
             <th onclick="sortTable(2,'cost')" class="hide-sp">費用 ↕</th>
-            <th class="hide-sp">備考</th>
-            <th>区分</th>
+            <th>備考</th>
             <th></th>
           </tr>
         </thead>
@@ -422,14 +422,14 @@ function renderTable(tbodyId, records, sortKey, sortDir, countId) {
   }
 
   tbody.innerHTML = sorted.map(r => `<tr>
+    <td><span class="badge badge-${r.category||'なし'}">${r.category||'なし'}</span></td>
     <td><strong>${r.vendor||'—'}</strong></td>
-    <td class="hide-sp">${r.artist||'—'}</td>
+    <td>${r.artist||'—'}</td>
     <td>${r.artwork||'—'}</td>
-    <td>${fmt(r.sentDate)}</td>
+    <td class="hide-sp">${fmt(r.sentDate)}</td>
     <td class="hide-sp">${fmt(r.returnDate)}</td>
     <td class="hide-sp">${fmtCost(r.cost)}</td>
-    <td class="hide-sp">${r.memo||'—'}</td>
-    <td><span class="badge badge-${r.category||'なし'}">${r.category||'なし'}</span></td>
+    <td style="min-width:200px; white-space:normal; max-width:320px;">${r.memo||'—'}</td>
     <td><div class="actions">
       <button class="btn btn-sm" onclick="openModal('${r.id}')">編集</button>
       <button class="btn btn-sm" onclick="deleteRecord('${r.id}')" style="color:var(--red)">削除</button>
