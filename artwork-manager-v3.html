@@ -107,6 +107,68 @@
   }
   .cb-label input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); width: 13px; height: 13px; }
 
+
+  /* 編集モーダル */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(40,35,28,0.5); z-index: 200;
+    align-items: center; justify-content: center;
+    padding: 1rem; backdrop-filter: blur(2px);
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; width: 100%; max-width: 600px;
+    max-height: 92vh; overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+  .modal-box-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.9rem 1.3rem; border-bottom: 1px solid var(--border);
+    background: var(--surface2); font-size: 0.82rem;
+    font-weight: 500; letter-spacing: 0.1em; color: var(--ink2);
+    position: sticky; top: 0;
+  }
+  .modal-box-body { padding: 1.2rem 1.3rem; }
+  .modal-box-footer {
+    display: flex; justify-content: flex-end; gap: 0.6rem;
+    padding: 0.9rem 1.3rem; border-top: 1px solid var(--border);
+    position: sticky; bottom: 0; background: var(--surface);
+  }
+
+  /* 集計表 */
+  .summary-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 2px; margin-bottom: 1rem;
+  }
+  .summary-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.65rem 1.2rem; cursor: pointer;
+    font-size: 0.78rem; font-weight: 400; color: var(--ink2);
+    letter-spacing: 0.12em; user-select: none; background: var(--surface2);
+  }
+  .summary-header:hover { background: #ebe5dc; }
+  .summary-body { padding: 1rem 1.2rem; border-top: 1px solid var(--border); overflow-x: auto; }
+  .summary-grid {
+    display: grid; gap: 1.2rem;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+  .summary-group { }
+  .summary-group-title {
+    font-size: 0.68rem; letter-spacing: 0.15em; color: var(--ink3);
+    margin-bottom: 0.5rem; padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .summary-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 0.2rem 0; font-size: 0.78rem; border-bottom: 1px solid #f0ece6;
+  }
+  .summary-row:last-child { border-bottom: none; }
+  .summary-vendor { color: var(--ink); border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
+  .summary-vendor:hover { border-bottom-color: var(--accent); color: var(--accent); }
+  .summary-count { font-size: 0.75rem; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  .summary-empty { font-size: 0.75rem; color: var(--ink3); }
+
   /* インラインフォーム */
   .inline-form {
     background: var(--surface); border: 1px solid var(--border);
@@ -233,13 +295,24 @@
     <span class="file-status" id="fileStatus">— 未読み込み</span>
   </div>
 
+  <!-- 集計表 -->
+  <div class="summary-wrap" id="summaryWrap">
+    <div class="summary-header" onclick="toggleSummary()">
+      <span>集計</span>
+      <span id="summaryToggleIcon">▲</span>
+    </div>
+    <div class="summary-body" id="summaryBody">
+      <div id="summaryContent"></div>
+    </div>
+  </div>
+
   <!-- 常時表示の入力フォーム -->
   <div class="inline-form" id="inlineForm">
     <div class="inline-form-title" onclick="toggleForm()">
       <span>＋ 新規登録</span>
-      <span id="formToggleIcon">▲</span>
+      <span id="formToggleIcon">▼</span>
     </div>
-    <div class="inline-form-body" id="inlineFormBody">
+    <div class="inline-form-body" id="inlineFormBody" style="display:none">
       <div class="form-rows">
         <!-- 1段目：区分・業者名 -->
         <div class="form-row">
@@ -372,6 +445,84 @@
   </div>
 </main>
 
+
+<!-- 編集モーダル -->
+<div class="modal-overlay" id="editModal" onclick="closeEditModal(event)">
+  <div class="modal-box">
+    <div class="modal-box-header">
+      <span id="modalLabel">編集</span>
+      <button onclick="closeEditModal()" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--ink3);">✕</button>
+    </div>
+    <div class="modal-box-body">
+      <div class="form-rows">
+        <div class="form-row">
+          <div class="form-group">
+            <label>区分</label>
+            <select class="form-select" id="m-category">
+              <option value="予定">予定</option>
+              <option value="渡し中">渡し中</option>
+              <option value="返却中">返却中</option>
+              <option value="完了">完了</option>
+              <option value="なし">なし</option>
+            </select>
+          </div>
+          <div class="form-group form-grow">
+            <label>業者名</label>
+            <div style="display:flex;gap:0.4rem;">
+              <select class="form-select" id="m-vendor-select" onchange="document.getElementById('m-vendor').value=this.value" style="width:160px;flex-shrink:0;">
+                <option value="">-- 選択 --</option>
+              </select>
+              <input type="text" id="m-vendor" placeholder="または直接入力" style="flex:1;">
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1;">
+            <label>作家名</label>
+            <input type="text" id="m-artist">
+          </div>
+          <div class="form-group" style="flex:2;">
+            <label>作品名</label>
+            <input type="text" id="m-artwork">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>渡し日</label>
+            <input type="date" id="m-sentDate">
+          </div>
+          <div class="form-group">
+            <label>返却日</label>
+            <input type="date" id="m-returnDate">
+          </div>
+          <div class="form-group">
+            <label>費用（円）</label>
+            <input type="number" id="m-cost" placeholder="0" min="0">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1;">
+            <label>備考</label>
+            <textarea id="m-memo"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-box-footer">
+      <button class="btn" onclick="closeEditModal()">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveModalRecord()">保存する</button>
+    </div>
+  </div>
+</div>
+<div id="confirmDialog" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:400; align-items:center; justify-content:center;">
+  <div style="background:#fdfcf9; border:1px solid #e2dbd2; border-radius:4px; padding:1.5rem; max-width:300px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.15);">
+    <p id="confirmMsg" style="font-size:0.85rem; color:#1c1a18; margin-bottom:1.2rem; line-height:1.6;"></p>
+    <div style="display:flex; justify-content:flex-end; gap:0.6rem;">
+      <button class="btn btn-sm" id="confirmCancel">キャンセル</button>
+      <button class="btn btn-sm btn-primary" id="confirmOk" style="background:#9b4a4a; border-color:#9b4a4a;">削除する</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -529,8 +680,8 @@ function renderTable(tbodyId, records, sortKey, sortDir, countId) {
     <td style="padding-bottom:0.15rem; white-space:nowrap;">${fmtCost(r.cost)}</td>
     <td rowspan="2" style="vertical-align:middle; width:80px;">
       <div class="actions">
-        <button class="btn btn-sm" onclick="openModal('${r.id}')">編集</button>
-        <button class="btn btn-sm" onclick="deleteRecord('${r.id}')" style="color:var(--red)">削除</button>
+        <button class="btn btn-sm" onclick="event.stopPropagation();openModal('${r.id}')">編集</button>
+        <button class="btn btn-sm" onclick="event.stopPropagation();deleteRecord('${r.id}')" style="color:var(--red)">削除</button>
       </div>
     </td>
   </tr>
@@ -554,6 +705,7 @@ function renderAll() {
   renderTable('tbody1', group1, sortKey1, sortDir1, 'count1');
   renderTable('tbody2', group2, sortKey2, sortDir2, 'count2');
   updateVendorList();
+  renderSummary();
 }
 
 function sortTable(tableNum, key) {
@@ -567,6 +719,48 @@ function sortTable(tableNum, key) {
 
 // モーダル
 // フォーム開閉
+function toggleSummary() {
+  const body = document.getElementById('summaryBody');
+  const icon = document.getElementById('summaryToggleIcon');
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  icon.textContent = hidden ? '▲' : '▼';
+}
+
+function renderSummary() {
+  const cats = ['予定', '渡し中', '返却中', '完了'];
+  const content = document.getElementById('summaryContent');
+  if (!records.length) {
+    content.innerHTML = '<span class="summary-empty">データなし</span>';
+    return;
+  }
+
+  const html = '<div class="summary-grid">' + cats.map(cat => {
+    const group = records.filter(r => (r.category || 'なし') === cat);
+    if (!group.length) return '';
+    // 業者別集計
+    const byVendor = {};
+    group.forEach(r => {
+      const v = r.vendor || '（業者未設定）';
+      byVendor[v] = (byVendor[v] || 0) + 1;
+    });
+    const rows = Object.entries(byVendor)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([v, n]) => `
+        <div class="summary-row">
+          <span class="summary-vendor" style="cursor:pointer;" title="ダブルクリックで絞込" onclick="filterByVendor(this.dataset.v)" data-v="${v}">${v}</span>
+          <span class="summary-count">${n}点</span>
+        </div>`).join('');
+
+    return `<div class="summary-group">
+      <div class="summary-group-title"><span class="badge badge-${cat}">${cat}</span>&ensp;計 ${group.length}点</div>
+      ${rows}
+    </div>`;
+  }).filter(Boolean).join('') + '</div>';
+
+  content.innerHTML = html;
+}
+
 function toggleForm() {
   const body = document.getElementById('inlineFormBody');
   const icon = document.getElementById('formToggleIcon');
@@ -578,19 +772,57 @@ function toggleForm() {
 function openModal(id = null) {
   editId = id;
   const r = id ? records.find(x => x.id === id) : null;
+  // モーダルの業者セレクト更新
+  const vendors = [...new Set(records.map(x => x.vendor).filter(Boolean))].sort();
+  const mSel = document.getElementById('m-vendor-select');
+  mSel.innerHTML = '<option value="">-- 選択 --</option>' + vendors.map(v => `<option value="${v}">${v}</option>`).join('');
   const vendorVal = r?.vendor || '';
-  document.getElementById('f-vendor-select').value = vendorVal;
-  document.getElementById('f-vendor').value = vendorVal;
-  document.getElementById('f-artist').value = r?.artist || '';
-  document.getElementById('f-artwork').value = r?.artwork || '';
-  document.getElementById('f-category').value = r?.category || '予定';
-  document.getElementById('f-sentDate').value = r?.sentDate || '';
-  document.getElementById('f-returnDate').value = r?.returnDate || '';
-  document.getElementById('f-cost').value = r?.cost ?? '';
-  document.getElementById('f-memo').value = r?.memo || '';
-  document.getElementById('inlineFormBody').style.display = '';
-  document.getElementById('formToggleIcon').textContent = '▲';
-  document.getElementById('inlineForm').scrollIntoView({ behavior: 'smooth' });
+  mSel.value = vendorVal;
+  document.getElementById('m-vendor').value = vendorVal;
+  document.getElementById('m-artist').value = r?.artist || '';
+  document.getElementById('m-artwork').value = r?.artwork || '';
+  document.getElementById('m-category').value = r?.category || '予定';
+  document.getElementById('m-sentDate').value = r?.sentDate || '';
+  document.getElementById('m-returnDate').value = r?.returnDate || '';
+  document.getElementById('m-cost').value = r?.cost ?? '';
+  document.getElementById('m-memo').value = r?.memo || '';
+  document.getElementById('modalLabel').textContent = id ? '編集' : '新規登録';
+  document.getElementById('editModal').classList.add('open');
+}
+
+function closeEditModal(e) {
+  if (e && e.target !== document.getElementById('editModal')) return;
+  document.getElementById('editModal').classList.remove('open');
+  editId = null;
+}
+
+function saveModalRecord() {
+  const vendor = document.getElementById('m-vendor').value.trim();
+  if (!vendor) { showToast('業者名を入力してください'); return; }
+  const rec = {
+    id: editId || uid(),
+    vendor,
+    artist: document.getElementById('m-artist').value.trim(),
+    artwork: document.getElementById('m-artwork').value.trim(),
+    category: document.getElementById('m-category').value,
+    sentDate: document.getElementById('m-sentDate').value,
+    returnDate: document.getElementById('m-returnDate').value,
+    cost: document.getElementById('m-cost').value,
+    memo: document.getElementById('m-memo').value.trim(),
+  };
+  if (editId) { const i = records.findIndex(r => r.id === editId); records[i] = rec; }
+  else records.unshift(rec);
+  unsavedChanges = true;
+  document.getElementById('editModal').classList.remove('open');
+  editId = null;
+  renderAll();
+  showToast(rec.id && editId !== rec.id ? '登録しました' : '更新しました');
+}
+
+function filterByVendor(vendor) {
+  document.getElementById('filterVendor').value = vendor;
+  renderAll();
+  showToast(`「${vendor}」で絞込みました`);
 }
 
 function clearForm() {
@@ -631,10 +863,24 @@ function saveRecord() {
 }
 
 function deleteRecord(id) {
-  if (!confirm('削除しますか？')) return;
-  records = records.filter(r => r.id !== id);
-  unsavedChanges = true;
-  renderAll(); showToast('削除しました');
+  showConfirm('このデータを削除しますか？', () => {
+    records = records.filter(r => r.id !== id);
+    unsavedChanges = true;
+    renderAll();
+    showToast('削除しました');
+  });
+}
+
+function showConfirm(msg, onOk) {
+  document.getElementById('confirmMsg').textContent = msg;
+  document.getElementById('confirmOk').onclick = () => {
+    document.getElementById('confirmDialog').style.display = 'none';
+    onOk();
+  };
+  document.getElementById('confirmCancel').onclick = () => {
+    document.getElementById('confirmDialog').style.display = 'none';
+  };
+  document.getElementById('confirmDialog').style.display = 'flex';
 }
 
 // ファイル操作
