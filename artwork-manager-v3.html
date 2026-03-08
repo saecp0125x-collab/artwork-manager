@@ -363,6 +363,10 @@
           <label>GAS Web アプリ URL</label>
           <input type="text" id="gasUrl" placeholder="https://script.google.com/macros/s/XXXXX/exec" autocomplete="off">
         </div>
+        <div class="settings-group">
+          <label>APIトークン</label>
+          <input type="password" id="apiToken" placeholder="configシートに設定した値" autocomplete="off">
+        </div>
         <div style="display:flex; gap:0.5rem; align-items:flex-end; flex-shrink:0;">
           <button class="btn btn-primary" onclick="connectAndLoad()">接続・読み込み</button>
           <button class="btn" onclick="saveSettings()">設定を保存</button>
@@ -371,9 +375,10 @@
       <div class="settings-note">
         <strong>セットアップ手順：</strong><br>
         1. <a href="#" onclick="showGASCode()">Apps Script コード</a> をコピーして、Google スプレッドシートのスクリプトエディタに貼り付けます<br>
-        2. 「デプロイ」→「新しいデプロイ」→ 種類：ウェブアプリ → アクセスできるユーザー：<strong>全員</strong> → デプロイ<br>
-        3. 表示された URL をここに貼り付けて「接続・読み込み」を押します<br>
-        ※ スプレッドシートには <strong>artwork</strong> という名前のシートが自動作成されます
+        2. 「デプロイ」→「新しいデプロイ」→ 種類：ウェブアプリ → 実行ユーザー：<strong>自分</strong> → アクセスできるユーザー：<strong>全員</strong> → デプロイ<br>
+        3. 初回実行後に作成される <strong>config</strong> シートの <strong>apiToken</strong> に長めのランダム文字列を設定します<br>
+        4. 表示された URL と APIトークンをここに貼り付けて「接続・読み込み」を押します<br>
+        ※ データ用の <strong>artwork</strong> と更新履歴用の <strong>audit_log</strong> シートも自動作成されます
       </div>
     </div>
   </div>
@@ -630,19 +635,6 @@
   </div>
 </div>
 
-<!-- パスワード画面 -->
-<div id="passwordScreen" style="display:none; position:fixed; inset:0; background:var(--bg); z-index:500; align-items:center; justify-content:center;">
-  <div style="background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:2.5rem 2rem; max-width:320px; width:90%; box-shadow:0 8px 32px var(--shadow); text-align:center;">
-    <div style="font-family:'Noto Serif JP',serif; font-size:0.85rem; letter-spacing:0.2em; color:var(--ink); margin-bottom:0.4rem;">作品管理システム</div>
-    <div style="font-size:0.7rem; color:var(--ink3); letter-spacing:0.1em; margin-bottom:1.8rem;">パスワードを入力してください</div>
-    <input type="password" id="passwordInput" placeholder="パスワード"
-      style="width:100%; padding:0.6rem 0.8rem; border:1px solid var(--border); border-radius:2px; font-size:0.85rem; font-family:'Noto Sans JP',sans-serif; outline:none; margin-bottom:0.6rem; text-align:center; letter-spacing:0.15em; background:#fff;"
-      onkeydown="if(event.key==='Enter')checkPassword()">
-    <div id="passwordError" style="font-size:0.72rem; color:var(--red); margin-bottom:0.8rem; min-height:1.2em;"></div>
-    <button class="btn btn-primary" onclick="checkPassword()" style="width:100%;">入力</button>
-  </div>
-</div>
-
 <!-- ローディング -->
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box">
@@ -655,20 +647,24 @@
 
 <script>
 // ===== 設定 =====
-const SETTINGS_KEY = 'artworkManagerSettings_v1';
+const SETTINGS_KEY = 'artworkManagerSettings_v2';
 let GAS_URL = '';
+let API_TOKEN = '';
 
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     GAS_URL = s.gasUrl || '';
+    API_TOKEN = s.apiToken || '';
     if (GAS_URL) document.getElementById('gasUrl').value = GAS_URL;
+    if (API_TOKEN) document.getElementById('apiToken').value = API_TOKEN;
   } catch(e) {}
 }
 
 function saveSettings() {
   GAS_URL = document.getElementById('gasUrl').value.trim();
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gasUrl: GAS_URL }));
+  API_TOKEN = document.getElementById('apiToken').value.trim();
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ gasUrl: GAS_URL, apiToken: API_TOKEN }));
   showToast('設定を保存しました');
 }
 
@@ -685,45 +681,49 @@ let editId = null;
 let sortKey1 = null, sortDir1 = 1;
 let sortKey2 = null, sortDir2 = 1;
 
-// ===== Sheets API 通信 (JSONP) =====
-function gasRequest(params) {
-  return new Promise((resolve, reject) => {
-    if (!GAS_URL) { reject(new Error('GAS URL が設定されていません')); return; }
-    const cbName = '_gasCallback_' + Date.now();
-    const timeout = setTimeout(() => {
-      delete window[cbName];
-      if (script.parentNode) script.parentNode.removeChild(script);
-      reject(new Error('タイムアウトしました'));
-    }, 15000);
-    window[cbName] = function(data) {
-      clearTimeout(timeout);
-      delete window[cbName];
-      if (script.parentNode) script.parentNode.removeChild(script);
-      if (data.error) reject(new Error(data.error));
-      else resolve(data);
-    };
-    const p = Object.assign({}, params, { callback: cbName });
-    const url = GAS_URL + '?' + new URLSearchParams(p);
-    const script = document.createElement('script');
-    script.src = url;
-    script.onerror = () => {
-      clearTimeout(timeout);
-      delete window[cbName];
-      reject(new Error('接続できませんでした'));
-    };
-    document.head.appendChild(script);
-  });
+// ===== Sheets API 通信 (POST JSON) =====
+async function gasRequest(payload) {
+  if (!GAS_URL) throw new Error('GAS URL が設定されていません');
+  if (!API_TOKEN) throw new Error('APIトークンが設定されていません');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        ...payload,
+        token: API_TOKEN,
+        meta: { userAgent: navigator.userAgent }
+      }),
+      signal: controller.signal
+    });
+
+    if (!res.ok) throw new Error('接続に失敗しました');
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || '通信エラー');
+    return data;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('タイムアウトしました');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function connectAndLoad() {
   GAS_URL = document.getElementById('gasUrl').value.trim();
   if (!GAS_URL) { showToast('URLを入力してください', true); return; }
+  if (!document.getElementById('apiToken').value.trim()) { showToast('APIトークンを入力してください', true); return; }
   saveSettings();
   await loadFromSheets();
 }
 
 async function loadFromSheets() {
   if (!GAS_URL) { showToast('先に GAS URL を設定してください', true); return; }
+  if (!API_TOKEN) { showToast('先に APIトークン を設定してください', true); return; }
   setSyncState('loading', '読み込み中...');
   showLoading('スプレッドシートから読み込み中...');
   try {
@@ -745,12 +745,12 @@ async function loadFromSheets() {
 }
 
 async function addRecord(rec) {
-  const data = await gasRequest({ action: 'add', record: JSON.stringify(rec) });
+  const data = await gasRequest({ action: 'add', record: rec });
   return data.record;
 }
 
 async function updateRecord(rec) {
-  const data = await gasRequest({ action: 'update', record: JSON.stringify(rec) });
+  const data = await gasRequest({ action: 'update', record: rec });
   return data.record;
 }
 
@@ -776,6 +776,7 @@ async function saveRecord() {
   const vendor = document.getElementById('f-vendor').value.trim();
   if (!vendor) { showToast('業者名を入力してください', true); return; }
   if (!GAS_URL) { showToast('先に GAS URL を設定してください', true); return; }
+  if (!API_TOKEN) { showToast('先に APIトークン を設定してください', true); return; }
 
   const rec = {
     vendor,
@@ -803,7 +804,7 @@ async function saveRecord() {
   }
 }
 
-async function deleteRecord(id) {
+async function deleteRecordAction(id) {
   showConfirm('このデータを削除しますか？', async () => {
     showLoading('削除中...');
     try {
@@ -851,6 +852,7 @@ async function saveModalRecord() {
   const vendor = document.getElementById('m-vendor').value.trim();
   if (!vendor) { showToast('業者名を入力してください', true); return; }
   if (!GAS_URL) { showToast('先に GAS URL を設定してください', true); return; }
+  if (!API_TOKEN) { showToast('先に APIトークン を設定してください', true); return; }
 
   const rec = {
     id: editId,
@@ -895,6 +897,15 @@ function fmt(d) {
   return `${dt.getFullYear()}/${String(dt.getMonth()+1).padStart(2,'0')}/${String(dt.getDate()).padStart(2,'0')}`;
 }
 function fmtCost(n) { return (n !== '' && n !== null && n !== undefined && String(n) !== '0' && n !== 0) ? '¥'+Number(n).toLocaleString() : '—'; }
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 
 function setSyncState(state, text) {
   const dot = document.getElementById('syncDot');
@@ -995,23 +1006,23 @@ function renderTable(tbodyId, recs, sortKey, sortDir, countId) {
       <span class="badge badge-${r.category||'なし'}">${r.category||'なし'}</span>
     </td>
     <td rowspan="2" style="vertical-align:middle; border-right:1px solid var(--border); font-weight:500;">
-      ${r.vendor||'—'}
+      ${esc(r.vendor||'—')}
     </td>
-    <td style="padding-bottom:0.15rem;">${r.artist||'—'}</td>
-    <td style="padding-bottom:0.15rem; white-space:normal;">${r.artwork||'—'}</td>
+    <td style="padding-bottom:0.15rem;">${esc(r.artist||'—')}</td>
+    <td style="padding-bottom:0.15rem; white-space:normal;">${esc(r.artwork||'—')}</td>
     <td style="padding-bottom:0.15rem; white-space:nowrap;">${fmt(r.sentDate)}</td>
     <td style="padding-bottom:0.15rem; white-space:nowrap;">${fmt(r.returnDate)}</td>
     <td style="padding-bottom:0.15rem; white-space:nowrap;">${fmtCost(r.cost)}</td>
     <td rowspan="2" style="vertical-align:middle; width:80px;">
       <div class="actions">
         <button class="btn btn-sm" onclick="event.stopPropagation();openModal('${r.id}')">編集</button>
-        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteRecord('${r.id}')">削除</button>
+        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteRecordAction('${r.id}')">削除</button>
       </div>
     </td>
   </tr>
   <tr class="row-sub" ondblclick="openModal('${r.id}')" style="cursor:pointer" onmouseenter="hoverPair(this,true)" onmouseleave="hoverPair(this,false)">
     <td colspan="5" style="padding-top:0.15rem; color:var(--ink3); font-size:0.7rem; white-space:normal;">
-      ${r.memo || '&nbsp;'}
+      ${r.memo ? esc(r.memo) : '&nbsp;'}
     </td>
   </tr>`).join('');
 }
@@ -1057,7 +1068,7 @@ function renderSummary() {
     const byVendor = {};
     group.forEach(r => { const v = r.vendor || '（業者未設定）'; byVendor[v] = (byVendor[v]||0)+1; });
     const rows = Object.entries(byVendor).sort((a,b)=>a[0].localeCompare(b[0],'ja'))
-      .map(([v,n]) => `<div class="summary-row"><span class="summary-vendor" onclick="filterByVendor('${v}')">${v}</span><span class="summary-count">${n}点</span></div>`).join('');
+      .map(([v,n]) => `<div class="summary-row"><span class="summary-vendor" onclick="filterByVendor(${JSON.stringify(v)})">${esc(v)}</span><span class="summary-count">${n}点</span></div>`).join('');
     return `<div class="summary-group"><div class="summary-group-title"><span class="badge badge-${cat}">${cat}</span>&ensp;計 ${group.length}点</div>${rows}</div>`;
   }).filter(Boolean).join('') + '</div>';
   content.innerHTML = html;
@@ -1127,40 +1138,132 @@ function copyGASCode() {
   navigator.clipboard.writeText(GAS_CODE).then(() => showToast('コードをコピーしました'));
 }
 
-const GAS_CODE = `// ========================================
-// 作品管理システム - Apps Script バックエンド
-// Google スプレッドシートのスクリプトエディタに貼り付けてデプロイしてください
-// ========================================
-
-const SHEET_NAME = 'artwork';
-const COLUMNS = ['id','vendor','artist','artwork','category','sentDate','returnDate','cost','memo'];
+const GAS_CODE = `const SHEET_NAME = 'artwork';
+const LOG_SHEET_NAME = 'audit_log';
+const CONFIG_SHEET_NAME = 'config';
+const BASE_COLUMNS = ['id','vendor','artist','artwork','category','sentDate','returnDate','cost','memo'];
+const META_COLUMNS = ['isDeleted','createdAt','updatedAt'];
+const ALL_COLUMNS = [...BASE_COLUMNS, ...META_COLUMNS];
+const ALLOWED_CATEGORIES = ['予定','渡し中','返却中','完了','なし'];
 
 function getSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME);
-    sheet.appendRow(COLUMNS);
-    sheet.getRange(1, 1, 1, COLUMNS.length).setFontWeight('bold');
+    sheet.appendRow(ALL_COLUMNS);
+    sheet.getRange(1, 1, 1, ALL_COLUMNS.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  } else {
+    ensureColumns(sheet, ALL_COLUMNS);
+  }
+  return sheet;
+}
+
+function getLogSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(LOG_SHEET_NAME);
+  const logColumns = ['timestamp','action','recordId','beforeJson','afterJson','userAgent'];
+  if (!sheet) {
+    sheet = ss.insertSheet(LOG_SHEET_NAME);
+    sheet.appendRow(logColumns);
+    sheet.getRange(1, 1, 1, logColumns.length).setFontWeight('bold');
     sheet.setFrozenRows(1);
   }
   return sheet;
 }
 
-function doGet(e) {
-  const action = e.parameter.action || 'getAll';
-  let result;
-  try {
-    if (action === 'getAll') result = getAllRecords();
-    else if (action === 'add') result = addRecord(JSON.parse(e.parameter.record));
-    else if (action === 'update') result = updateRecord(JSON.parse(e.parameter.record));
-    else if (action === 'delete') result = deleteRecord(e.parameter.id);
-    else result = { error: 'Unknown action: ' + action };
-  } catch(err) {
-    result = { error: err.toString() };
+function getConfigSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG_SHEET_NAME);
+    sheet.appendRow(['key','value']);
+    sheet.getRange(1,1,1,2).setFontWeight('bold');
+    sheet.appendRow(['apiToken','']);
+    sheet.setFrozenRows(1);
   }
+  return sheet;
+}
+
+function ensureColumns(sheet, expected) {
+  const current = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+  expected.forEach((col, idx) => {
+    if (current[idx] !== col) {
+      sheet.getRange(1, idx + 1).setValue(col);
+    }
+  });
+}
+
+function getApiToken() {
+  const config = getConfigSheet();
+  const data = config.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === 'apiToken') return String(data[i][1] || '').trim();
+  }
+  return '';
+}
+
+function doGet() {
+  return jsonResponse({
+    ok: true,
+    message: 'POST only. Use JSON body with token and action.'
+  });
+}
+
+function doPost(e) {
+  try {
+    const body = parseBody_(e);
+    authorize_(body);
+
+    let result;
+    switch (body.action) {
+      case 'getAll':
+        result = getAllRecords();
+        break;
+      case 'add':
+        result = addRecord(body.record || {}, body.meta || {});
+        break;
+      case 'update':
+        result = updateRecord(body.record || {}, body.meta || {});
+        break;
+      case 'delete':
+        result = softDeleteRecord(body.id, body.meta || {});
+        break;
+      default:
+        throw new Error('Unknown action: ' + body.action);
+    }
+    return jsonResponse({ ok: true, ...result });
+  } catch (err) {
+    return jsonResponse({ ok: false, error: err.message || String(err) });
+  }
+}
+
+function parseBody_(e) {
+  if (!e || !e.postData || !e.postData.contents) {
+    throw new Error('Request body is empty');
+  }
+  try {
+    return JSON.parse(e.postData.contents);
+  } catch (err) {
+    throw new Error('Invalid JSON body');
+  }
+}
+
+function authorize_(body) {
+  const token = String(body.token || '').trim();
+  const saved = getApiToken();
+  if (!saved) {
+    throw new Error('Config sheet の apiToken が未設定です');
+  }
+  if (!token || token !== saved) {
+    throw new Error('Unauthorized');
+  }
+}
+
+function jsonResponse(obj) {
   return ContentService
-    .createTextOutput(JSON.stringify(result))
+    .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -1169,89 +1272,148 @@ function getAllRecords() {
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return { records: [] };
   const headers = data[0];
-  const records = data.slice(1).map(row => {
-    const rec = {};
-    headers.forEach((h, i) => { rec[h] = row[i] === null || row[i] === undefined ? '' : String(row[i]); });
-    return rec;
-  }).filter(r => r.id);
+  const records = data.slice(1)
+    .map(rowToRecord_.bind(null, headers))
+    .filter(r => r.id && r.isDeleted !== '1');
   return { records };
+}
+
+function rowToRecord_(headers, row) {
+  const rec = {};
+  headers.forEach((h, i) => {
+    rec[h] = row[i] === null || row[i] === undefined ? '' : String(row[i]);
+  });
+  return rec;
 }
 
 function uid() {
   return Utilities.getUuid().replace(/-/g, '').slice(0, 16);
 }
 
-function addRecord(rec) {
-  const sheet = getSheet();
-  rec.id = uid();
-  const row = COLUMNS.map(c => rec[c] || '');
-  sheet.appendRow(row);
-  return { record: rec };
+function sanitizeRecord_(rec, { isUpdate = false } = {}) {
+  const clean = {
+    id: isUpdate ? String(rec.id || '').trim() : '',
+    vendor: String(rec.vendor || '').trim(),
+    artist: String(rec.artist || '').trim(),
+    artwork: String(rec.artwork || '').trim(),
+    category: String(rec.category || '予定').trim(),
+    sentDate: normalizeDate_(rec.sentDate),
+    returnDate: normalizeDate_(rec.returnDate),
+    cost: normalizeCost_(rec.cost),
+    memo: String(rec.memo || '').trim(),
+    isDeleted: '0'
+  };
+
+  if (isUpdate && !clean.id) throw new Error('id が必要です');
+  if (!clean.vendor) throw new Error('業者名は必須です');
+  if (!ALLOWED_CATEGORIES.includes(clean.category)) throw new Error('区分が不正です');
+  if (clean.vendor.length > 100) throw new Error('業者名が長すぎます');
+  if (clean.artist.length > 100) throw new Error('作家名が長すぎます');
+  if (clean.artwork.length > 200) throw new Error('作品名が長すぎます');
+  if (clean.memo.length > 2000) throw new Error('備考が長すぎます');
+
+  return clean;
 }
 
-function updateRecord(rec) {
+function normalizeDate_(value) {
+  const v = String(value || '').trim();
+  if (!v) return '';
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(v)) throw new Error('日付形式が不正です');
+  return v;
+}
+
+function normalizeCost_(value) {
+  const v = String(value || '').trim();
+  if (!v) return '';
+  if (!/^\\d+$/.test(v)) throw new Error('費用は0以上の整数で入力してください');
+  return String(Number(v));
+}
+
+function addRecord(rec, meta) {
+  const sheet = getSheet();
+  const now = new Date().toISOString();
+  const clean = sanitizeRecord_(rec);
+  clean.id = uid();
+  clean.createdAt = now;
+  clean.updatedAt = now;
+  const row = ALL_COLUMNS.map(c => clean[c] || '');
+  sheet.appendRow(row);
+  writeLog_('add', clean.id, null, clean, meta);
+  return { record: pickBaseColumns_(clean) };
+}
+
+function updateRecord(rec, meta) {
   const sheet = getSheet();
   const data = sheet.getDataRange().getValues();
-  const idCol = COLUMNS.indexOf('id');
+  const headers = data[0];
+  const idCol = headers.indexOf('id');
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][idCol]) === String(rec.id)) {
-      const row = COLUMNS.map(c => rec[c] || '');
-      sheet.getRange(i + 1, 1, 1, COLUMNS.length).setValues([row]);
-      return { record: rec };
+    const existing = rowToRecord_(headers, data[i]);
+    if (String(existing.id) === String(rec.id) && String(existing.isDeleted || '0') !== '1') {
+      const clean = sanitizeRecord_(rec, { isUpdate: true });
+      clean.createdAt = existing.createdAt || new Date().toISOString();
+      clean.updatedAt = new Date().toISOString();
+      const row = ALL_COLUMNS.map(c => clean[c] || '');
+      sheet.getRange(i + 1, 1, 1, ALL_COLUMNS.length).setValues([row]);
+      writeLog_('update', clean.id, pickBaseColumns_(existing), clean, meta);
+      return { record: pickBaseColumns_(clean) };
     }
   }
   throw new Error('Record not found: ' + rec.id);
 }
 
-function deleteRecord(id) {
+function softDeleteRecord(id, meta) {
+  const safeId = String(id || '').trim();
+  if (!safeId) throw new Error('id が必要です');
   const sheet = getSheet();
   const data = sheet.getDataRange().getValues();
-  const idCol = COLUMNS.indexOf('id');
+  const headers = data[0];
+  const idCol = headers.indexOf('id');
+  const deletedCol = headers.indexOf('isDeleted');
+  const updatedAtCol = headers.indexOf('updatedAt');
+
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][idCol]) === String(id)) {
-      sheet.deleteRow(i + 1);
+    const existing = rowToRecord_(headers, data[i]);
+    if (String(data[i][idCol]) === safeId && String(existing.isDeleted || '0') !== '1') {
+      sheet.getRange(i + 1, deletedCol + 1).setValue('1');
+      sheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      writeLog_('delete', safeId, pickBaseColumns_(existing), null, meta);
       return { deleted: true };
     }
   }
-  throw new Error('Record not found: ' + id);
-}`;
-
-// ===== パスワード =====
-const PASSWORD_KEY = 'artworkManagerAuth_v1';
-// ★ここでパスワードを設定してください★
-const APP_PASSWORD = '20220601';
-
-function checkPassword() {
-  const input = document.getElementById('passwordInput').value;
-  if (input === APP_PASSWORD) {
-    sessionStorage.setItem(PASSWORD_KEY, '1');
-    document.getElementById('passwordScreen').style.display = 'none';
-    initApp();
-  } else {
-    document.getElementById('passwordError').textContent = 'パスワードが違います';
-    document.getElementById('passwordInput').value = '';
-    document.getElementById('passwordInput').focus();
-  }
+  throw new Error('Record not found: ' + safeId);
 }
+
+function pickBaseColumns_(rec) {
+  const out = {};
+  BASE_COLUMNS.forEach(c => out[c] = String(rec[c] || ''));
+  return out;
+}
+
+function writeLog_(action, recordId, beforeValue, afterValue, meta) {
+  const log = getLogSheet();
+  log.appendRow([
+    new Date().toISOString(),
+    action,
+    recordId,
+    beforeValue ? JSON.stringify(beforeValue) : '',
+    afterValue ? JSON.stringify(pickBaseColumns_(afterValue)) : '',
+    String((meta && meta.userAgent) || '')
+  ]);
+}
+`;
 
 function initApp() {
   loadSettings();
   renderAll();
-  if (GAS_URL) {
+  if (GAS_URL && API_TOKEN) {
     loadFromSheets();
   } else {
     toggleSettings();
   }
 }
 
-// ===== 起動 =====
-if (sessionStorage.getItem(PASSWORD_KEY) === '1') {
-  initApp();
-} else {
-  const ps = document.getElementById('passwordScreen');
-  ps.style.display = 'flex';
-  setTimeout(() => document.getElementById('passwordInput').focus(), 100);
-}
+initApp();
 </script>
 </body>
 </html>
