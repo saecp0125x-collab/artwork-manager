@@ -672,15 +672,34 @@ let editId = null;
 let sortKey1 = null, sortDir1 = 1;
 let sortKey2 = null, sortDir2 = 1;
 
-// ===== Sheets API 通信 =====
-async function gasRequest(params) {
-  if (!GAS_URL) throw new Error('GAS URL が設定されていません');
-  const url = GAS_URL + '?' + new URLSearchParams(params);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  return data;
+// ===== Sheets API 通信 (JSONP) =====
+function gasRequest(params) {
+  return new Promise((resolve, reject) => {
+    if (!GAS_URL) { reject(new Error('GAS URL が設定されていません')); return; }
+    const cbName = '_gasCallback_' + Date.now();
+    const timeout = setTimeout(() => {
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+      reject(new Error('タイムアウトしました'));
+    }, 15000);
+    window[cbName] = function(data) {
+      clearTimeout(timeout);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+      if (data.error) reject(new Error(data.error));
+      else resolve(data);
+    };
+    const p = Object.assign({}, params, { callback: cbName });
+    const url = GAS_URL + '?' + new URLSearchParams(p);
+    const script = document.createElement('script');
+    script.src = url;
+    script.onerror = () => {
+      clearTimeout(timeout);
+      delete window[cbName];
+      reject(new Error('接続できませんでした'));
+    };
+    document.head.appendChild(script);
+  });
 }
 
 async function connectAndLoad() {
