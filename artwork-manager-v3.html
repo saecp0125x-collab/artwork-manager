@@ -630,6 +630,19 @@
   </div>
 </div>
 
+<!-- パスワード画面 -->
+<div id="passwordScreen" style="display:none; position:fixed; inset:0; background:var(--bg); z-index:500; align-items:center; justify-content:center;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:2.5rem 2rem; max-width:320px; width:90%; box-shadow:0 8px 32px var(--shadow); text-align:center;">
+    <div style="font-family:'Noto Serif JP',serif; font-size:0.85rem; letter-spacing:0.2em; color:var(--ink); margin-bottom:0.4rem;">作品管理システム</div>
+    <div style="font-size:0.7rem; color:var(--ink3); letter-spacing:0.1em; margin-bottom:1.8rem;">パスワードを入力してください</div>
+    <input type="password" id="passwordInput" placeholder="パスワード"
+      style="width:100%; padding:0.6rem 0.8rem; border:1px solid var(--border); border-radius:2px; font-size:0.85rem; font-family:'Noto Sans JP',sans-serif; outline:none; margin-bottom:0.6rem; text-align:center; letter-spacing:0.15em; background:#fff;"
+      onkeydown="if(event.key==='Enter')checkPassword()">
+    <div id="passwordError" style="font-size:0.72rem; color:var(--red); margin-bottom:0.8rem; min-height:1.2em;"></div>
+    <button class="btn btn-primary" onclick="checkPassword()" style="width:100%;">入力</button>
+  </div>
+</div>
+
 <!-- ローディング -->
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box">
@@ -1203,15 +1216,41 @@ function deleteRecord(id) {
   throw new Error('Record not found: ' + id);
 }`;
 
-// ===== 初期化 =====
-loadSettings();
-renderAll();
-if (GAS_URL) {
-  // URL保存済みなら自動接続
-  loadFromSheets();
+// ===== パスワード =====
+const PASSWORD_KEY = 'artworkManagerAuth_v1';
+// ★ここでパスワードを設定してください★
+const APP_PASSWORD = '20220601';
+
+function checkPassword() {
+  const input = document.getElementById('passwordInput').value;
+  if (input === APP_PASSWORD) {
+    sessionStorage.setItem(PASSWORD_KEY, '1');
+    document.getElementById('passwordScreen').style.display = 'none';
+    initApp();
+  } else {
+    document.getElementById('passwordError').textContent = 'パスワードが違います';
+    document.getElementById('passwordInput').value = '';
+    document.getElementById('passwordInput').focus();
+  }
+}
+
+function initApp() {
+  loadSettings();
+  renderAll();
+  if (GAS_URL) {
+    loadFromSheets();
+  } else {
+    toggleSettings();
+  }
+}
+
+// ===== 起動 =====
+if (sessionStorage.getItem(PASSWORD_KEY) === '1') {
+  initApp();
 } else {
-  // 設定パネルを開く
-  toggleSettings();
+  const ps = document.getElementById('passwordScreen');
+  ps.style.display = 'flex';
+  setTimeout(() => document.getElementById('passwordInput').focus(), 100);
 }
 </script>
 </body>
